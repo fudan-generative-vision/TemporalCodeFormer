@@ -2,6 +2,7 @@ import torch
 from collections import OrderedDict
 from os import path as osp
 from tqdm import tqdm
+from einops import rearrange
 
 from basicsr.archs import build_network
 from basicsr.metrics import calculate_metric
@@ -10,13 +11,16 @@ from basicsr.utils.registry import MODEL_REGISTRY
 import torch.nn.functional as F
 from .sr_model import SRModel
 
+# from icecream import ic
 
 @MODEL_REGISTRY.register()
-class CodeFormerIdxModel(SRModel):
+class CodeFormerTempModel(SRModel):
     def feed_data(self, data):
         self.gt = data['gt'].to(self.device)
         self.input = data['in'].to(self.device)
         self.b = self.gt.shape[0]
+        self.f = self.gt.shape[1]
+        self.bf = self.b * self.f
 
         if 'latent_gt' in data:
             self.idx_gt = data['latent_gt'].to(self.device)
@@ -62,6 +66,13 @@ class CodeFormerIdxModel(SRModel):
         self.entropy_loss_weight = train_opt.get('entropy_loss_weight', 0.5)
 
         self.net_g.train()
+        self.net_g.requires_grad_(False)
+
+        trainable_module = train_opt['trainable_para']
+        for name, module in self.net_g.named_modules():
+            if trainable_module in name :
+                for params in module.parameters():
+                    params.requires_grad_(True)
 
         # set up optimizers and schedulers
         self.setup_optimizers()
@@ -72,15 +83,17 @@ class CodeFormerIdxModel(SRModel):
         train_opt = self.opt['train']
         # optimizer g
         optim_params_g = []
+        optim_name = []
         for k, v in self.net_g.named_parameters():
             if v.requires_grad:
                 optim_params_g.append(v)
-            else:
-                logger = get_root_logger()
-                logger.warning(f'Params {k} will not be optimized.')
+                optim_name.append(k)
+            
         optim_type = train_opt['optim_g'].pop('type')
         self.optimizer_g = self.get_optimizer(optim_type, optim_params_g, **train_opt['optim_g'])
         self.optimizers.append(self.optimizer_g)
+
+        # ic(optim_name)
 
 
     def optimize_parameters(self, current_iter):
@@ -89,16 +102,21 @@ class CodeFormerIdxModel(SRModel):
         self.optimizer_g.zero_grad()
 
         if self.generate_idx_gt:
-            x = self.hq_vqgan_fix.encoder(self.gt)
+            x = rearrange(self.gt, "b f c h w -> (b f) c h w")
+            x = self.hq_vqgan_fix.encoder(x)
             _, _, quant_stats = self.hq_vqgan_fix.quantize(x)
             min_encoding_indices = quant_stats['min_encoding_indices']
-            self.idx_gt = min_encoding_indices.view(self.b, -1)
+            # ic(min_encoding_indices.shape)
+            self.idx_gt = min_encoding_indices.view(self.bf, -1)
+            # ic(self.idx_gt.shape)
         
         if self.hq_feat_loss:
             # quant_feats
-            quant_feat_gt = self.net_g.module.quantize.get_codebook_feat(self.idx_gt, shape=[self.b,16,16,256])
+            quant_feat_gt = self.net_g.module.quantize.get_codebook_feat(self.idx_gt, shape=[self.bf,16,16,256])
 
         logits, lq_feat = self.net_g(self.input, w=0, code_only=True)
+        # ic(logits.shape)
+        # ic(lq_feat.shape)
 
         l_g_total = 0
         loss_dict = OrderedDict()

@@ -632,16 +632,16 @@ def show_one_kernel():
     plt.show()
 
 
-def show_plateau_kernel():
-    import matplotlib.pyplot as plt
-    kernel_size = 21
+# def show_plateau_kernel():
+#     import matplotlib.pyplot as plt
+#     kernel_size = 21
 
-    kernel = plateau_type1(kernel_size, 2, 4, -math.pi / 8, 2, grid=None)
-    kernel_norm = bivariate_isotropic_Gaussian(kernel_size, 5)
-    kernel_gau = bivariate_generalized_Gaussian(
-        kernel_size, 2, 4, -math.pi / 8, 2, grid=None)
-    delta_h, delta_w = mass_center_shift(kernel_size, kernel)
-    print(delta_h, delta_w)
+#     kernel = plateau_type1(kernel_size, 2, 4, -math.pi / 8, 2, grid=None)
+#     kernel_norm = bivariate_isotropic_Gaussian(kernel_size, 5)
+#     kernel_gau = bivariate_generalized_Gaussian(
+#         kernel_size, 2, 4, -math.pi / 8, 2, grid=None)
+#     delta_h, delta_w = mass_center_shift(kernel_size, kernel)
+#     print(delta_h, delta_w)
 
     # kernel_slice = kernel[10, :]
     # kernel_gau_slice = kernel_gau[10, :]
@@ -662,29 +662,29 @@ def show_plateau_kernel():
     # ax.plot(t, y2)
     # plt.show()
 
-    fig, axs = plt.subplots(nrows=2, ncols=2)
-    # axs.set_axis_off()
-    ax = axs[0][0]
-    im = ax.matshow(kernel, cmap='jet', origin='upper')
-    fig.colorbar(im, ax=ax)
+    # fig, axs = plt.subplots(nrows=2, ncols=2)
+    # # axs.set_axis_off()
+    # ax = axs[0][0]
+    # im = ax.matshow(kernel, cmap='jet', origin='upper')
+    # fig.colorbar(im, ax=ax)
 
-    # image
-    ax = axs[0][1]
-    kernel_vis = kernel - np.min(kernel)
-    kernel_vis = kernel_vis / np.max(kernel_vis) * 255.
-    ax.imshow(kernel_vis, interpolation='nearest')
+    # # image
+    # ax = axs[0][1]
+    # kernel_vis = kernel - np.min(kernel)
+    # kernel_vis = kernel_vis / np.max(kernel_vis) * 255.
+    # ax.imshow(kernel_vis, interpolation='nearest')
 
-    _, xx, yy = mesh_grid(kernel_size)
-    # contour
-    ax = axs[1][0]
-    CS = ax.contour(xx, yy, kernel, origin='upper')
-    ax.clabel(CS, inline=1, fontsize=3)
+    # _, xx, yy = mesh_grid(kernel_size)
+    # # contour
+    # ax = axs[1][0]
+    # CS = ax.contour(xx, yy, kernel, origin='upper')
+    # ax.clabel(CS, inline=1, fontsize=3)
 
-    # contourf
-    ax = axs[1][1]
-    kernel = kernel / np.max(kernel)
-    p = ax.contourf(
-        xx, yy, kernel, origin='upper', levels=np.linspace(-0.05, 1.05, 10))
-    fig.colorbar(p)
+    # # contourf
+    # ax = axs[1][1]
+    # kernel = kernel / np.max(kernel)
+    # p = ax.contourf(
+    #     xx, yy, kernel, origin='upper', levels=np.linspace(-0.05, 1.05, 10))
+    # fig.colorbar(p)
 
-    plt.show()
+    # plt.show()
