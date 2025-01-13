@@ -25,7 +25,7 @@ def parse_options(root_path, is_train=True):
     parser = argparse.ArgumentParser()
     parser.add_argument('-opt', type=str, required=True, help='Path to option YAML file.')
     parser.add_argument('--launcher', choices=['none', 'pytorch', 'slurm'], default='none', help='job launcher')
-    parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument('--local-rank','--local_rank', type=int, default=0)
     args = parser.parse_args()
     opt = parse(args.opt, root_path, is_train=is_train)
 

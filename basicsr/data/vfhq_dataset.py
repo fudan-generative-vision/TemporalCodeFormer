@@ -15,16 +15,20 @@ from basicsr.data.data_util import paths_from_folder, brush_stroke_mask, random_
 from basicsr.utils import FileClient, get_root_logger, imfrombytes, img2tensor
 from basicsr.utils.registry import DATASET_REGISTRY
 
+from pathlib import Path
+import torchvision.transforms as transforms
+
 @DATASET_REGISTRY.register()
-class FFHQBlindDataset(data.Dataset):
+class VFHQBlindDataset(data.Dataset):
 
     def __init__(self, opt):
-        super(FFHQBlindDataset, self).__init__()
+        super(VFHQBlindDataset, self).__init__()
         logger = get_root_logger()
         self.opt = opt
         # file client (io backend)
         self.file_client = None
         self.io_backend_opt = opt['io_backend']
+        self.video_length = opt['video_length']
 
         self.gt_folder = opt['dataroot_gt']
         self.gt_size = opt.get('gt_size', 512)
@@ -59,26 +63,25 @@ class FFHQBlindDataset(data.Dataset):
             with open(osp.join(self.gt_folder, 'meta_info.txt')) as fin:
                 self.paths = [line.split('.')[0] for line in fin]
         else:
-            self.paths = paths_from_folder(self.gt_folder)
+            gt_folder = Path(self.gt_folder)
+            sub_dir = gt_folder.iterdir()
+            self.paths = []
+            for p in sub_dir:
+                if p.is_dir():
+                    l = list(p.glob('*.png'))
+                    if len(l) > self.video_length:
+                        self.paths.append(str(p))
+
 
         # inpainting mask
         self.gen_inpaint_mask = opt.get('gen_inpaint_mask', False)
         if self.gen_inpaint_mask:
             logger.info(f'generate mask ...')
-            # self.mask_max_angle = opt.get('mask_max_angle', 10)
-            # self.mask_max_len = opt.get('mask_max_len', 150)
-            # self.mask_max_width = opt.get('mask_max_width', 50)
-            # self.mask_draw_times = opt.get('mask_draw_times', 10)
-            # # print
-            # logger.info(f'mask_max_angle: {self.mask_max_angle}')
-            # logger.info(f'mask_max_len: {self.mask_max_len}')
-            # logger.info(f'mask_max_width: {self.mask_max_width}')
-            # logger.info(f'mask_draw_times: {self.mask_draw_times}')
+
 
         # perform corrupt
         self.use_corrupt = opt.get('use_corrupt', True)
         self.use_motion_kernel = False
-        # self.use_motion_kernel = opt.get('use_motion_kernel', True)
 
         if self.use_motion_kernel:
             self.motion_kernel_prob = opt.get('motion_kernel_prob', 0.001)
@@ -112,6 +115,7 @@ class FFHQBlindDataset(data.Dataset):
         if self.gray_prob is not None:
             logger.info(f'Use random gray. Prob: {self.gray_prob}')
         self.color_jitter_shift /= 255.
+
 
     @staticmethod
     def color_jitter(img, shift):
@@ -182,118 +186,113 @@ class FFHQBlindDataset(data.Dataset):
 
         # load gt image
         gt_path = self.paths[index]
-        name = osp.basename(gt_path)[:-4]
-        img_bytes = self.file_client.get(gt_path)
-        img_gt = imfrombytes(img_bytes, float32=True)
-        
-        # random horizontal flip
-        img_gt, status = augment(img_gt, hflip=self.opt['use_hflip'], rotation=False, return_status=True)
 
-        if self.load_latent_gt:
-            if status[0]:
-                latent_gt = self.latent_gt_dict['hflip'][name]
-            else:
-                latent_gt = self.latent_gt_dict['orig'][name]
+        image_list = list(Path(gt_path).glob('*.png'))
+        lenght = len(image_list)
 
-        if self.crop_components:
-            locations_gt, locations_in = self.get_component_locations(name, status)
+        start_idx = random.randint(0, lenght-self.video_length-1)
+        in_list = []
+        gt_list = []
 
-        # generate in image
-        img_in = img_gt
-        if self.use_corrupt and not self.gen_inpaint_mask:
-            # motion blur
-            if self.use_motion_kernel and random.random() < self.motion_kernel_prob:
-                m_i = random.randint(0,31)
-                k = self.motion_kernels[f'{m_i:02d}']
-                img_in = cv2.filter2D(img_in,-1,k)
+        for i in range(start_idx, start_idx+self.video_length):
+            gt_path_idx = image_list[i]
+
+            img_bytes = self.file_client.get(gt_path_idx)
+            img_gt = imfrombytes(img_bytes, float32=True)
             
-            # gaussian blur
-            kernel = gaussian_kernels.random_mixed_kernels(
-                self.kernel_list,
-                self.kernel_prob,
-                self.blur_kernel_size,
-                self.blur_sigma,
-                self.blur_sigma, 
-                [-math.pi, math.pi],
-                noise_range=None)
-            img_in = cv2.filter2D(img_in, -1, kernel)
+            # random horizontal flip
+            img_gt, status = augment(img_gt, hflip=self.opt['use_hflip'], rotation=False, return_status=True)
 
-            # downsample
-            scale = np.random.uniform(self.downsample_range[0], self.downsample_range[1])
-            img_in = cv2.resize(img_in, (int(self.gt_size // scale), int(self.gt_size // scale)), interpolation=cv2.INTER_LINEAR)
 
-            # noise
-            if self.noise_range is not None:
-                noise_sigma = np.random.uniform(self.noise_range[0] / 255., self.noise_range[1] / 255.)
-                noise = np.float32(np.random.randn(*(img_in.shape))) * noise_sigma
-                img_in = img_in + noise
-                img_in = np.clip(img_in, 0, 1)
+            # generate in image
+            img_in = img_gt
+            if self.use_corrupt and not self.gen_inpaint_mask:
+                # motion blur
+                if self.use_motion_kernel and random.random() < self.motion_kernel_prob:
+                    m_i = random.randint(0,31)
+                    k = self.motion_kernels[f'{m_i:02d}']
+                    img_in = cv2.filter2D(img_in,-1,k)
+                
+                # gaussian blur
+                kernel = gaussian_kernels.random_mixed_kernels(
+                    self.kernel_list,
+                    self.kernel_prob,
+                    self.blur_kernel_size,
+                    self.blur_sigma,
+                    self.blur_sigma, 
+                    [-math.pi, math.pi],
+                    noise_range=None)
+                img_in = cv2.filter2D(img_in, -1, kernel)
 
-            # jpeg
-            if self.jpeg_range is not None:
-                jpeg_p = np.random.uniform(self.jpeg_range[0], self.jpeg_range[1])
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_p)]
-                _, encimg = cv2.imencode('.jpg', img_in * 255., encode_param)
-                img_in = np.float32(cv2.imdecode(encimg, 1)) / 255.
+                # downsample
+                scale = np.random.uniform(self.downsample_range[0], self.downsample_range[1])
+                img_in = cv2.resize(img_in, (int(self.gt_size // scale), int(self.gt_size // scale)), interpolation=cv2.INTER_LINEAR)
 
-            # resize to in_size
-            img_in = cv2.resize(img_in, (self.in_size, self.in_size), interpolation=cv2.INTER_LINEAR)
+                # noise
+                if self.noise_range is not None:
+                    noise_sigma = np.random.uniform(self.noise_range[0] / 255., self.noise_range[1] / 255.)
+                    noise = np.float32(np.random.randn(*(img_in.shape))) * noise_sigma
+                    img_in = img_in + noise
+                    img_in = np.clip(img_in, 0, 1)
 
-        # if self.gen_inpaint_mask:
-        #     inpaint_mask = random_ff_mask(shape=(self.gt_size,self.gt_size), 
-        #         max_angle = self.mask_max_angle, max_len = self.mask_max_len, 
-        #         max_width = self.mask_max_width, times = self.mask_draw_times)
-        #     img_in = img_in * (1 - inpaint_mask.reshape(self.gt_size,self.gt_size,1)) + \
-        #              1.0 * inpaint_mask.reshape(self.gt_size,self.gt_size,1)
+                # jpeg
+                if self.jpeg_range is not None:
+                    jpeg_p = np.random.uniform(self.jpeg_range[0], self.jpeg_range[1])
+                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_p)]
+                    _, encimg = cv2.imencode('.jpg', img_in * 255., encode_param)
+                    img_in = np.float32(cv2.imdecode(encimg, 1)) / 255.
 
-        #     inpaint_mask = torch.from_numpy(inpaint_mask).view(1,self.gt_size,self.gt_size)
+                # resize to in_size
+                img_in = cv2.resize(img_in, (self.in_size, self.in_size), interpolation=cv2.INTER_LINEAR)
 
-        if self.gen_inpaint_mask:
-            img_in = (img_in*255).astype('uint8')
-            img_in = brush_stroke_mask(Image.fromarray(img_in))
-            img_in = np.array(img_in) / 255.
 
-        # random color jitter (only for lq)
-        if self.color_jitter_prob is not None and (np.random.uniform() < self.color_jitter_prob):
-            img_in = self.color_jitter(img_in, self.color_jitter_shift)
-        # random to gray (only for lq)
-        if self.gray_prob and np.random.uniform() < self.gray_prob:
-            img_in = cv2.cvtColor(img_in, cv2.COLOR_BGR2GRAY)
-            img_in = np.tile(img_in[:, :, None], [1, 1, 3])
+            if self.gen_inpaint_mask:
+                img_in = (img_in*255).astype('uint8')
+                img_in = brush_stroke_mask(Image.fromarray(img_in))
+                img_in = np.array(img_in) / 255.
 
-        # BGR to RGB, HWC to CHW, numpy to tensor
-        img_in, img_gt = img2tensor([img_in, img_gt], bgr2rgb=True, float32=True)
+            # random color jitter (only for lq)
+            if self.color_jitter_prob is not None and (np.random.uniform() < self.color_jitter_prob):
+                img_in = self.color_jitter(img_in, self.color_jitter_shift)
+            # random to gray (only for lq)
+            if self.gray_prob and np.random.uniform() < self.gray_prob:
+                img_in = cv2.cvtColor(img_in, cv2.COLOR_BGR2GRAY)
+                img_in = np.tile(img_in[:, :, None], [1, 1, 3])
 
-        # random color jitter (pytorch version) (only for lq)
-        if self.color_jitter_pt_prob is not None and (np.random.uniform() < self.color_jitter_pt_prob):
-            brightness = self.opt.get('brightness', (0.5, 1.5))
-            contrast = self.opt.get('contrast', (0.5, 1.5))
-            saturation = self.opt.get('saturation', (0, 1.5))
-            hue = self.opt.get('hue', (-0.1, 0.1))
-            img_in = self.color_jitter_pt(img_in, brightness, contrast, saturation, hue)
+            # BGR to RGB, HWC to CHW, numpy to tensor
+            img_in, img_gt = img2tensor([img_in, img_gt], bgr2rgb=True, float32=True)
 
-        # round and clip
-        img_in = np.clip((img_in * 255.0).round(), 0, 255) / 255.
+            # random color jitter (pytorch version) (only for lq)
+            if self.color_jitter_pt_prob is not None and (np.random.uniform() < self.color_jitter_pt_prob):
+                brightness = self.opt.get('brightness', (0.5, 1.5))
+                contrast = self.opt.get('contrast', (0.5, 1.5))
+                saturation = self.opt.get('saturation', (0, 1.5))
+                hue = self.opt.get('hue', (-0.1, 0.1))
+                img_in = self.color_jitter_pt(img_in, brightness, contrast, saturation, hue)
 
-        # Set vgg range_norm=True if use the normalization here
-        # normalize
-        normalize(img_in, self.mean, self.std, inplace=True)
-        normalize(img_gt, self.mean, self.std, inplace=True)
+            # round and clip
+            img_in = np.clip((img_in * 255.0).round(), 0, 255) / 255.
 
-        return_dict = {'in': img_in, 'gt': img_gt, 'gt_path': gt_path}
+            # Set vgg range_norm=True if use the normalization here
+            # normalize
+            normalize(img_in, self.mean, self.std, inplace=True)
+            normalize(img_gt, self.mean, self.std, inplace=True)
 
-        if self.crop_components:
-            return_dict['locations_in'] = locations_in
-            return_dict['locations_gt'] = locations_gt
+            img_in = img_in.unsqueeze(0)
+            img_gt = img_gt.unsqueeze(0)
 
-        if self.load_latent_gt:
-            return_dict['latent_gt'] = latent_gt
+            in_list.append(img_in)
+            gt_list.append(img_gt)
 
-        # if self.gen_inpaint_mask:
-        #     return_dict['inpaint_mask'] = inpaint_mask
+        in_video = torch.cat(in_list, dim=0)
+        gt_video = torch.cat(gt_list, dim=0)
+
+        return_dict = {'in': in_video, 'gt': gt_video}
 
         return return_dict
 
 
     def __len__(self):
         return len(self.paths)
+    
+        

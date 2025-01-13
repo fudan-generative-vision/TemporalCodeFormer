@@ -1,15 +1,15 @@
 # general settings
-name: CodeFormer_stage2
-model_type: CodeFormerIdxModel
+name: CodeFormer_temp
+model_type: CodeFormerTempModel
 num_gpu: 8
 manual_seed: 0
 
 # dataset and data loader settings
 datasets:
   train:
-    name: FFHQ
-    type: FFHQBlindDataset
-    dataroot_gt: datasets/ffhq/ffhq_512
+    name: VFHQ
+    type: VFHQBlindDataset
+    dataroot_gt: ./VFHQ/image
     filename_tmpl: '{}'
     io_backend:
       type: disk
@@ -20,6 +20,7 @@ datasets:
     std: [0.5, 0.5, 0.5]
     use_hflip: true
     use_corrupt: true
+    video_length: 16
 
     # large degradation in stageII
     blur_kernel_size: 41
@@ -33,12 +34,11 @@ datasets:
     jpeg_range: [30, 80]
 
     latent_gt_path: ~ # without pre-calculated latent code
-    # latent_gt_path: './experiments/pretrained_models/VQGAN/latent_gt_code1024.pth'
 
     # data loader
-    num_worker_per_gpu: 2
+    num_worker_per_gpu: 8
     batch_size_per_gpu: 4
-    dataset_enlarge_ratio: 100
+    dataset_enlarge_ratio: 1
     prefetch_mode: ~
 
   # val:
@@ -61,7 +61,7 @@ network_g:
   codebook_size: 1024
   connect_list: ['32', '64', '128', '256']
   fix_modules: ['quantize','generator']
-  vqgan_path: './experiments/pretrained_models/vqgan/vqgan_code1024.pth' # pretrained VQGAN 
+  vqgan_path: './pretrained_models/CodeFormer/vqgan_code1024.pth' # pretrained VQGAN 
 
 network_vqgan: # this config is needed if no pre-calculated latent
   type: VQAutoEncoder
@@ -70,10 +70,11 @@ network_vqgan: # this config is needed if no pre-calculated latent
   ch_mult: [1, 2, 2, 4, 4, 8]
   quantizer: 'nearest'
   codebook_size: 1024
+  model_path: './pretrained_models/CodeFormer/vqgan_code1024.pth'
 
 # path
 path:
-  pretrain_network_g: ~
+  pretrain_network_g: './pretrained_models/CodeFormer/codeformer.pth'
   param_key_g: params_ema
   strict_load_g: false
   pretrain_network_d: ~
@@ -87,6 +88,8 @@ train:
   cross_entropy_loss: true
   entropy_loss_weight: 0.5
   fidelity_weight: 0
+
+  trainable_para: temp
 
   optim_g:
     type: Adam
@@ -119,7 +122,7 @@ train:
 
 # validation settings
 val:
-  val_freq: !!float 5e10 # no validation
+  val_freq: 1000 
   save_img: true
 
   metrics:
@@ -130,8 +133,8 @@ val:
 
 # logging settings
 logger:
-  print_freq: 100
-  save_checkpoint_freq: !!float 1e4
+  print_freq: 1
+  save_checkpoint_freq: 1000
   use_tb_logger: true
   wandb:
     project: ~
